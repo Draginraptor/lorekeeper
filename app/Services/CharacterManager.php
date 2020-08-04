@@ -227,6 +227,11 @@ class CharacterManager extends Service
     private function handleCharacterImage($data, $character, $isMyo = false)
     {
         try {
+            $imageData = array_only($data, [
+                'species_id', 'subtype_id', 'rarity_id', 'use_custom_thumb', 
+                'x0', 'x1', 'y0', 'y1',
+            ]);
+
             if($isMyo)
             {
                 $data['species_id'] = (isset($data['species_id']) && $data['species_id']) ? $data['species_id'] : null;
@@ -234,29 +239,26 @@ class CharacterManager extends Service
                 $data['rarity_id'] = (isset($data['rarity_id']) && $data['rarity_id']) ? $data['rarity_id'] : null;
                 
 
-                // Use default images for MYO slots without an image provided
-                if(!isset($data['image']))
+                // Use default images for MYO slots without an image or ext_url provided
+                if(!isset($data['image']) && !isset($data['ext_url']))
                 {
-                    $data['image'] = asset('images/myo.png');
-                    $data['thumbnail'] = asset('images/myo-th.png');
+                    $data['image'] = public_path().'/images/myo.png';
+                    $data['thumbnail'] = public_path().'/images/myo-th.png';
                     $data['extension'] = 'png';
                     $data['default_image'] = true;
-                    unset($data['use_cropper']);
+                    $data['use_custom_thumb'] = true;
                 }
             }
-            $imageData = array_only($data, [
-                'species_id', 'subtype_id', 'rarity_id', 'use_cropper', 
-                'x0', 'x1', 'y0', 'y1',
-            ]);
-            $imageData['use_cropper'] = isset($data['use_cropper']) ;
+            $imageData['use_custom_thumb'] = isset($data['use_custom_thumb']) ;
             $imageData['description'] = isset($data['image_description']) ? $data['image_description'] : null;
             $imageData['parsed_description'] = parse($imageData['description']);
             $imageData['hash'] = randomString(10);
             $imageData['sort'] = 0;
             $imageData['is_valid'] = isset($data['is_valid']);
             $imageData['is_visible'] = isset($data['is_visible']);
-            $imageData['extension'] = isset($data['extension']) ? $data['extension'] : $data['image']->getClientOriginalExtension();
+            $imageData['extension'] = isset($data['extension']) ? $data['extension'] : (isset($data['use_custom_thumb']) && isset($data['thumbnail']) ? $data['thumbnail']->getClientOriginalExtension() : (isset($data['image']) ? $data['image']->getClientOriginalExtension() : 'png'));
             $imageData['character_id'] = $character->id;
+            $imageData['ext_url'] = isset($data['ext_url']) ? $data['ext_url'] : null;
 
             $image = CharacterImage::create($imageData);
 
@@ -281,11 +283,13 @@ class CharacterManager extends Service
             }
 
             // Save image
-            $this->handleImage($data['image'], $image->imageDirectory, $image->imageFileName, null, isset($data['default_image']));
+            if(isset($data['image'])) {
+                $this->handleImage($data['image'], $image->imageDirectory, $image->imageFileName, null, isset($data['default_image']));
+            }
             
             // Save thumbnail
-            if(isset($data['use_cropper'])) $this->cropThumbnail(array_only($data, ['x0','x1','y0','y1']), $image);
-            else $this->handleImage($data['thumbnail'], $image->imageDirectory, $image->thumbnailFileName, null, isset($data['default_image']));
+            if(!isset($data['use_custom_thumb']) && isset($data['image'])) $this->cropThumbnail(array_only($data, ['x0','x1','y0','y1']), $image);
+            else if(isset($data['use_custom_thumb'])) $this->handleImage($data['thumbnail'], $image->imageDirectory, $image->thumbnailFileName, null, isset($data['default_image']));
             
             // Attach features
             foreach($data['feature_id'] as $key => $featureId) {
@@ -613,13 +617,26 @@ class CharacterManager extends Service
         DB::beginTransaction();
 
         try {
-            // Save image
-            $this->handleImage($data['image'], $image->imageDirectory, $image->imageFileName);
+            // Update according to if image or ext_url is being used
+            if(isset($data['image'])) {
+                $image->ext_url = null;
+                // Save image
+                $this->handleImage($data['image'], $image->imageDirectory, $image->imageFileName, null, isset($data['default_image']));
+            }
+            else if(isset($data['ext_url'])) {
+                $image->ext_url = $data['ext_url'];
+            }
+            
+            // Update use_custom_thumb property
+            $image->use_custom_thumb = isset($data['use_custom_thumb']);
             
             // Save thumbnail
-            if(isset($data['use_cropper'])) $this->cropThumbnail(array_only($data, ['x0','x1','y0','y1']), $image);
-            else $this->handleImage($data['thumbnail'], $image->thumbnailDirectory, $image->thumbnailFileName);
+            if(!isset($data['use_custom_thumb']) && isset($data['image'])) $this->cropThumbnail(array_only($data, ['x0','x1','y0','y1']), $image);
+            else if(isset($data['use_custom_thumb'])) $this->handleImage($data['thumbnail'], $image->imageDirectory, $image->thumbnailFileName, null, isset($data['default_image']));
             
+            // Update row
+            $image->save();
+
             // Add a log for the character
             // This logs all the updates made to the character
             $this->createLog($user->id, null, null, null, $image->character_id, 'Image Reuploaded', '[#'.$image->id.']', 'character');
@@ -632,7 +649,7 @@ class CharacterManager extends Service
     }
 
     /**
-     * Reuploads an image.
+     * Deletes an image.
      *
      * @param  \App\Models\Character\CharacterImage  $image
      * @param  \App\Models\User\User                 $user
@@ -650,8 +667,8 @@ class CharacterManager extends Service
             $image->delete();
 
             // Delete the image files
-            unlink($image->imagePath . '/' . $image->imageFileName);
-            unlink($image->imagePath . '/' . $image->thumbnailFileName);
+            if(file_exists($image->imagePath . '/' . $image->imageFileName)) unlink($image->imagePath . '/' . $image->imageFileName);
+            if(file_exists($image->imagePath . '/' . $image->thumbnailFileName)) unlink($image->imagePath . '/' . $image->thumbnailFileName);
             
             // Add a log for the character
             // This logs all the updates made to the character
@@ -1498,29 +1515,36 @@ class CharacterManager extends Service
         DB::beginTransaction();
 
         try {
-            // Require an image to be uploaded the first time, but if an image already exists, allow user to update the other details
-            if(!$isAdmin && !isset($data['image']) && !file_exists($request->imagePath . '/' . $request->imageFileName)) throw new \Exception("Please upload a valid image.");
+            // Require an image or ext_url to be uploaded the first time, but if an image or ext_url already exists, allow user to update the other details
+            if(!$isAdmin && !isset($data['image']) && !file_exists($request->imagePath . '/' . $request->imageFileName) && !isset($data['ext_url']) && !isset($data['ext_url'])) throw new \Exception("Please upload a valid image or add a dA link.");
 
-            // Require a thumbnail to be uploaded the first time as well
-            if(!file_exists($request->thumbnailPath . '/' . $request->thumbnailFileName)) {
+            // Require a thumbnail to be uploaded the first time as well, if using image OR using ext_url w/ use_custom_thumb checked
+            if(!file_exists($request->thumbnailPath . '/' . $request->thumbnailFileName) && (!isset($data['ext_url']) || (isset($data['ext_url']) && isset($data['use_custom_thumb'])))) {
                 // If the crop dimensions are invalid... 
                 // The crop function resizes the thumbnail to fit, so we only need to check that it's not null
                 if(!$isAdmin || ($isAdmin && isset($data['modify_thumbnail']))) {
-                    if(isset($data['use_cropper']) && ($data['x0'] === null || $data['x1'] === null || $data['y0'] === null || $data['y1'] === null)) throw new \Exception('Invalid crop dimensions specified.');
-                    if(!isset($data['use_cropper']) && !isset($data['thumbnail'])) throw new \Exception("Please upload a valid thumbnail or use the image cropper.");
+                    if(!isset($data['use_custom_thumb']) && !isset($data['ext_url']) && ($data['x0'] === null || $data['x1'] === null || $data['y0'] === null || $data['y1'] === null)) throw new \Exception('Invalid crop dimensions specified.');
+                    if(isset($data['use_custom_thumb']) && !isset($data['thumbnail'])) throw new \Exception("Please upload a valid thumbnail or use the image cropper.");
                 }
             }
             if(!$isAdmin || ($isAdmin && isset($data['modify_thumbnail']))) {
                 $imageData = [];
-                if(isset($data['use_cropper'])) {
+                if(!isset($data['use_custom_thumb'])) {
                     $imageData = array_only($data, [
-                        'use_cropper', 
+                        'use_custom_thumb', 
                         'x0', 'x1', 'y0', 'y1',
                     ]);
-                    $imageData['use_cropper'] = isset($data['use_cropper']);
                 }
+                $imageData['use_custom_thumb'] = isset($data['use_custom_thumb']);
                 if(!$isAdmin && isset($data['image'])) {
                     $imageData['extension'] = isset($data['extension']) ? $data['extension'] : $data['image']->getClientOriginalExtension();
+                    $imageData['ext_url'] = null;
+                    $imageData['has_image'] = true;
+                }
+                else if(!$isAdmin && isset($data['ext_url'])) {
+                    if(isset($data['use_custom_thumb'])) { $imageData['extension'] = isset($data['extension']) ? $data['extension'] : $data['thumbnail']->getClientOriginalExtension(); }
+                    else { $imageData['extension'] = 'png'; }
+                    $imageData['ext_url'] = $data['ext_url'];
                     $imageData['has_image'] = true;
                 }
                 $request->update($imageData);
@@ -1556,7 +1580,7 @@ class CharacterManager extends Service
             
             // Save thumbnail
             if(!$isAdmin || ($isAdmin && isset($data['modify_thumbnail']))) {
-                if(isset($data['use_cropper']))
+                if(!isset($data['use_custom_thumb']) && !isset($request->ext_url))
                     $this->cropThumbnail(array_only($data, ['x0','x1','y0','y1']), $request);
                 else if(isset($data['thumbnail'])) 
                     $this->handleImage($data['thumbnail'], $request->imageDirectory, $request->thumbnailFileName);
@@ -1763,12 +1787,16 @@ class CharacterManager extends Service
             // However logs need to be added for each of these
             $requestData = $request->data;
             $inventoryManager = new InventoryManager;
-            $stacks = UserItem::where('holding_type', 'Update')->where('holding_id', $request->id)->get();
-            foreach($stacks as $stack) {
-                if(!$inventoryManager->createLog($request->user_id, null, $stack->id, $request->character->is_myo_slot ? 'MYO Design Approved' : 'Character Design Updated', 'Item used in ' . ($request->character->is_myo_slot ? 'MYO design approval' : 'character design update') . ' (<a href="'.$request->url.'">#'.$request->id.'</a>)', $stack->item_id, $stack->count)) throw new \Exception("Failed to create log for item stack.");
+            if(isset($requestData['user']) && isset($requestData['user']['user_items'])) {
+                $stacks = $requestData['user']['user_items'];
+                foreach($stacks as $stackId=>$quantity) {
+                    $stack = UserItem::find($stackId);
+                    if($stack->update_count < $quantity) throw new \Exception("Cannot return more items than was held. (".$stackId.")");
+                    $stack->update_count -= $quantity;
+                    $stack_user = User::find($request->user_id);
+                    if(!$inventoryManager->debitStack($stack_user, $request->character->is_myo_slot ? 'MYO Design Approved' : 'Character Design Updated', ['data' => 'Item used in ' . ($request->character->is_myo_slot ? 'MYO design approval' : 'Character design update') . ' (<a href="'.$request->url.'">#'.$request->id.'</a>)'], $stack, $quantity)) throw new \Exception("Failed to create log for item stack.");
+                }
             }
-            UserItem::where('holding_type', 'Update')->where('holding_id', $request->id)->delete();
-
             $currencyManager = new CurrencyManager;
             if(isset($requestData['user']['currencies']) && $requestData['user']['currencies'])
             {
@@ -1799,7 +1827,7 @@ class CharacterManager extends Service
                 'is_visible' => 1,
                 'hash' => $request->hash,
                 'extension' => $request->extension,
-                'use_cropper' => $request->use_cropper,
+                'use_custom_thumb' => $request->use_custom_thumb,
                 'x0' => $request->x0,
                 'x1' => $request->x1,
                 'y0' => $request->y0,
@@ -1807,6 +1835,7 @@ class CharacterManager extends Service
                 'species_id' => $request->species_id,
                 'subtype_id' => $request->subtype_id,
                 'rarity_id' => $request->rarity_id,
+                'ext_url' => $request->ext_url,
                 'sort' => 0,
             ]);
 
@@ -1827,8 +1856,10 @@ class CharacterManager extends Service
             $request->rawFeatures()->update(['character_image_id' => $image->id, 'character_type' => 'Character']);
 
             // Move the image file to the new image
-            File::move($request->imagePath . '/' . $request->imageFileName, $image->imagePath . '/' . $image->imageFileName);
-            File::move($request->thumbnailPath . '/' . $request->thumbnailFileName, $image->thumbnailPath . '/' . $image->thumbnailFileName);
+            if(!File::exists($image->imagePath)) File::makeDirectory($image->imagePath);
+            if(!File::exists($image->thumbnailPath)) File::makeDirectory($image->thumbnailPath);
+            if(!isset($request->ext_url)) File::move($request->imagePath . '/' . $request->imageFileName, $image->imagePath . '/' . $image->imageFileName);
+            if(!isset($request->ext_url) || $request->use_custom_thumb == 1) File::move($request->thumbnailPath . '/' . $request->thumbnailFileName, $image->thumbnailPath . '/' . $image->thumbnailFileName);
 
             // Set character data and other info such as cooldown time, resell cost and terms etc.
             // since those might be updated with the new design update
@@ -1859,9 +1890,8 @@ class CharacterManager extends Service
                 $request->character->character_image_id = $image->id;
             }
 
-            // Add a log for the character and user
-            $this->createLog($user->id, null, $request->character->user_id, $request->character->user->alias, $request->character->id, $request->character->is_myo_slot ? 'MYO Design Approved' : 'Character Design Updated', '[#'.$image->id.']', 'character');
-            $this->createLog($user->id, null, $request->character->user_id, $request->character->user->alias, $request->character->id, $request->character->is_myo_slot ? 'MYO Design Approved' : 'Character Design Updated', '[#'.$image->id.']', 'user');
+            // Add a log for the character
+            $this->createLog($user->id, null, $request->user->id, $request->user->alias, $request->character->id, $request->character->is_myo_slot ? 'MYO Design Approved' : 'Character Design Updated', '[#'.$image->id.']', 'character');
             
             // If this is for a MYO, set user's FTO status and the MYO status of the slot
             if($request->character->is_myo_slot)

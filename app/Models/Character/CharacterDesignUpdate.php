@@ -9,6 +9,8 @@ use App\Models\Currency\Currency;
 use App\Models\Feature\FeatureCategory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+use App\Services\EmbedService;
+
 class CharacterDesignupdate extends Model
 {
     use SoftDeletes;
@@ -21,10 +23,10 @@ class CharacterDesignupdate extends Model
     protected $fillable = [
         'character_id', 'status', 'user_id', 'staff_id',
         'comments', 'staff_comments', 'data', 'extension',
-        'use_cropper', 'x0', 'x1', 'y0', 'y1',
+        'use_custom_thumb', 'x0', 'x1', 'y0', 'y1',
         'hash', 'species_id', 'subtype_id', 'rarity_id', 
         'has_comments', 'has_image', 'has_addons', 'has_features',
-        'submitted_at'
+        'submitted_at', 'ext_url'
     ];
 
     /**
@@ -56,6 +58,7 @@ class CharacterDesignupdate extends Model
     public static $imageRules = [
         'image' => 'nullable|mimes:jpeg,gif,png',
         'thumbnail' => 'nullable|mimes:jpeg,gif,png',
+        'ext_url' => 'nullable|url',
     ];
 
     /**********************************************************************************************
@@ -213,7 +216,7 @@ class CharacterDesignupdate extends Model
         // This is for showing the addons page
         // just need to retrieve a list of stack IDs to tell which ones to check
 
-        return $this->data ? $this->data['stacks'] : [];
+        return $this->data && isset($this->data['user']['user_items']) ? $this->data['user']['user_items'] : [];
     }
 
     /**
@@ -283,7 +286,12 @@ class CharacterDesignupdate extends Model
      */
     public function getImageUrlAttribute()
     {
-        return asset($this->imageDirectory . '/' . $this->imageFileName);
+        if(!isset($this->ext_url)) { return asset($this->imageDirectory . '/' . $this->imageFileName); }
+        else
+        {
+            $embed = new EmbedService();
+            return $embed->getEmbed($this->ext_url)['url'];
+        }
     }
 
     /**
@@ -313,7 +321,12 @@ class CharacterDesignupdate extends Model
      */
     public function getThumbnailUrlAttribute()
     {
-        return asset($this->imageDirectory . '/' . $this->thumbnailFileName);
+        if($this->use_custom_thumb || !isset($this->ext_url)) { return asset($this->imageDirectory . '/' . $this->thumbnailFileName); }
+        else
+        {
+            $embed = new EmbedService();
+            return $embed->getEmbed($this->ext_url)['thumbnail_url'];
+        }
     }
 
     /**

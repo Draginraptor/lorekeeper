@@ -1,20 +1,32 @@
 {!! Form::open(['url' => 'admin/character/image/'.$image->id.'/reupload', 'files' => true]) !!}
-<div class="form-group">
+    <div class="form-group">
         {!! Form::label('Character Image') !!} {!! add_help('This is the full masterlist image. Note that the image is not protected in any way, so take precautions to avoid art/design theft.') !!}
         <div>{!! Form::file('image', ['id' => 'mainImage']) !!}</div>
+        ---OR---
+        <div>{!! Form::text('ext_url', null, ['class' => 'form-control', 'id' => 'extMainImage', 'placeholder' => 'Add a link to a dA or sta.sh upload']) !!}</div>
     </div>
     <div class="form-group">
-        {!! Form::checkbox('use_cropper', 1, 1, ['class' => 'form-check-input', 'data-toggle' => 'toggle', 'id' => 'useCropper']) !!}
-        {!! Form::label('use_cropper', 'Use Image Cropper', ['class' => 'form-check-label ml-3']) !!} {!! add_help('A thumbnail is required for the upload (used for the masterlist). You can use the image cropper (crop dimensions can be adjusted in the site code), or upload a custom thumbnail.') !!}
+        {!! Form::checkbox('use_custom_thumb', 1, 0, ['class' => 'form-check-input', 'data-toggle' => 'toggle', 'id' => 'useCustomThumbnail']) !!}
+        {!! Form::label('use_custom_thumb', 'Upload Custom Thumbnail', ['class' => 'form-check-label ml-3']) !!} {!! add_help('A thumbnail is required for the upload (used for the masterlist). You can use the image cropper (crop dimensions can be adjusted in the site code), or upload a custom thumbnail.') !!}
+    </div>
+    <div class="card mb-3" id="thumbnailSelect">
+        <div class="card-body">
+            Select an image to use the thumbnail cropper, or add a dA link to see a preview.
+        </div>
     </div>
     <div class="card mb-3" id="thumbnailCrop">
         <div class="card-body">
-            <div id="cropSelect">Select an image to use the thumbnail cropper.</div>
             <img src="#" id="cropper" class="hide" />
             {!! Form::hidden('x0', null, ['id' => 'cropX0']) !!}
             {!! Form::hidden('x1', null, ['id' => 'cropX1']) !!}
             {!! Form::hidden('y0', null, ['id' => 'cropY0']) !!}
             {!! Form::hidden('y1', null, ['id' => 'cropY1']) !!}
+        </div>
+    </div>
+    <div class="card mb-3" id="thumbnailDaPreview">
+        <div class="card-body">
+            <p id="previewMessage"></p>
+            <img src="#" id="thumbnailDa"/>
         </div>
     </div>
     <div class="card mb-3" id="thumbnailUpload">
@@ -36,29 +48,58 @@
 
         // Cropper ////////////////////////////////////////////////////////////////////////////////////
 
-        var $useCropper = $('#useCropper');
+        var $useCustomThumbnail = $('#useCustomThumbnail');
+        var $thumbnailSelect = $('#thumbnailSelect');
         var $thumbnailCrop = $('#thumbnailCrop');
         var $thumbnailUpload = $('#thumbnailUpload');
+        var $thumbnailDaPreview = $('#thumbnailDaPreview');
 
-        var useCropper = $useCropper.is(':checked');
+        var useCustomThumbnail = $useCustomThumbnail.is(':checked');
 
-        updateCropper();
+        updatePreviewArea();
 
-        $useCropper.on('change', function(e) {
-            useCropper = $useCropper.is(':checked');
-
-            updateCropper();
+        $useCustomThumbnail.on('change', function(e) {
+            useCustomThumbnail = $useCustomThumbnail.is(':checked');
+            updatePreviewArea();
         });
 
-        function updateCropper() {
-            if(useCropper) {
-                $thumbnailUpload.addClass('hide');
-                $thumbnailCrop.removeClass('hide');
+        function updatePreviewArea() {
+            if(useCustomThumbnail) {
+                unhideUpload();
             }
             else {
-                $thumbnailCrop.addClass('hide');
-                $thumbnailUpload.removeClass('hide');
+                if(($('#mainImage')[0] && $('#mainImage')[0].value)) { unhideCrop(); }
+                else if($('#extMainImage')[0] && $('#extMainImage')[0].value) { unhideDaPreview(); }
+                else { unhideSelect(); }
             }
+        }
+        
+        function unhideSelect() {
+            $thumbnailUpload.addClass('hide');
+            $thumbnailSelect.removeClass('hide');
+            $thumbnailCrop.addClass('hide');
+            $thumbnailDaPreview.addClass('hide');
+        }
+
+        function unhideCrop() {
+            $thumbnailUpload.addClass('hide');
+            $thumbnailSelect.addClass('hide');
+            $thumbnailCrop.removeClass('hide');
+            $thumbnailDaPreview.addClass('hide');
+        }
+
+        function unhideDaPreview() {
+            $thumbnailUpload.addClass('hide');
+            $thumbnailSelect.addClass('hide');
+            $thumbnailCrop.addClass('hide');
+            $thumbnailDaPreview.removeClass('hide');
+        }
+
+        function unhideUpload() {
+            $thumbnailUpload.removeClass('hide');
+            $thumbnailSelect.addClass('hide');
+            $thumbnailCrop.addClass('hide');
+            $thumbnailDaPreview.addClass('hide');
         }
 
         // Croppie ////////////////////////////////////////////////////////////////////////////////////
@@ -74,6 +115,14 @@
         var zoom = 0;
 
         function readURL(input) {
+            // First reset croppie
+            if(c) {
+                c.destroy();
+                c.element.outerHTML = c.element.innerHTML;
+            }
+            c = null;
+            $cropper = $('#cropper');
+            $cropper.attr('src', '#');
             if (input.files && input.files[0]) {
                 var reader = new FileReader();
                 reader.onload = function(e) {
@@ -97,7 +146,44 @@
         }
 
         $("#mainImage").change(function() {
+            $('#extMainImage')[0].value = null;
+            $useCustomThumbnail.bootstrapToggle('off');
             readURL(this);
+        });
+
+        var embed_route = "/embed?url="
+
+        function fetchEmbeds(url) {
+            // Set current embed and error as loading
+            $('#previewMessage').html('Loading...');
+            $('#thumbnailDa').attr('src', '/images/loading.gif');
+            if(typeof url !== 'undefined') {
+                $.get(embed_route + url, function(data, status) {
+                    if(typeof data['error'] !== 'undefined') {
+                        $('#previewMessage').html('Error: ' + data['error']);
+                        $('#thumbnailDa').attr('src', '#');
+                    }
+                    else
+                    {
+                        $('#previewMessage').html('Image found: <a href=' + url + '>' + url + '</a>');
+                        $('#thumbnailDa').attr('src', data['thumbnail_url']);
+                    }
+                    updatePreviewArea();
+                }).catch(function() {
+                    $('#previewMessage').html('Error: Server failed to process request');
+                    $('#thumbnailDa').attr('src', '#');
+                });
+            }
+            else {
+                $('#previewMessage').html('Error: URL is undefined');
+                $('#thumbnailDa').attr('src', '#');
+            }
+        }
+
+        $("#extMainImage").focusout(function() {
+            $("#mainImage")[0].value = null;
+            $useCustomThumbnail.bootstrapToggle('off');
+            fetchEmbeds(this.value);
         });
 
         function updateCropValues() {

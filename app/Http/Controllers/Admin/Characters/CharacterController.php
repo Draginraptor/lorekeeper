@@ -95,12 +95,12 @@ class CharacterController extends Controller
         $data = $request->only([
             'user_id', 'owner_alias', 'character_category_id', 'number', 'slug',
             'description', 'is_visible', 'is_giftable', 'is_tradeable', 'is_sellable',
-            'sale_value', 'transferrable_at', 'use_cropper',
+            'sale_value', 'transferrable_at', 'use_custom_thumb',
             'x0', 'x1', 'y0', 'y1',
             'designer_alias', 'designer_url',
             'artist_alias', 'artist_url',
             'species_id', 'subtype_id', 'rarity_id', 'feature_id', 'feature_data',
-            'image', 'thumbnail', 'image_description'
+            'image', 'ext_url', 'thumbnail', 'image_description'
         ]);
         if ($character = $service->createCharacter($data, Auth::user())) {
             flash('Character created successfully.')->success();
@@ -125,12 +125,12 @@ class CharacterController extends Controller
         $data = $request->only([
             'user_id', 'owner_alias', 'name',
             'description', 'is_visible', 'is_giftable', 'is_tradeable', 'is_sellable',
-            'sale_value', 'transferrable_at', 'use_cropper',
+            'sale_value', 'transferrable_at', 'use_custom_thumbnail',
             'x0', 'x1', 'y0', 'y1',
             'designer_alias', 'designer_url',
             'artist_alias', 'artist_url',
             'species_id', 'subtype_id', 'rarity_id', 'feature_id', 'feature_data',
-            'image', 'thumbnail'
+            'image', 'ext_url', 'thumbnail'
         ]);
         if ($character = $service->createCharacter($data, Auth::user(), true)) {
             flash('MYO slot created successfully.')->success();

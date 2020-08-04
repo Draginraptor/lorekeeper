@@ -9,6 +9,8 @@ use App\Models\Feature\FeatureCategory;
 use App\Models\Character\CharacterCategory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+use App\Services\EmbedService;
+
 class CharacterImage extends Model
 {
     use SoftDeletes;
@@ -20,10 +22,10 @@ class CharacterImage extends Model
      */
     protected $fillable = [
         'character_id', 'user_id', 'species_id', 'subtype_id', 'rarity_id', 'url',
-        'extension', 'use_cropper', 'hash', 'sort', 
+        'extension', 'use_custom_thumb', 'hash', 'sort', 
         'x0', 'x1', 'y0', 'y1',
         'description', 'parsed_description',
-        'is_valid', 
+        'is_valid', 'ext_url', 'genotype', 'phenotype', 'accessories'
     ];
 
     /**
@@ -48,8 +50,9 @@ class CharacterImage extends Model
     public static $createRules = [
         'species_id' => 'required',
         'rarity_id' => 'required',
-        'image' => 'required|mimes:jpeg,gif,png|max:20000',
+        'image' => 'required_without:ext_url|nullable|mimes:jpeg,gif,png|max:20000',
         'thumbnail' => 'nullable|mimes:jpeg,gif,png|max:20000',
+        'ext_url' => 'required_without:image|nullable|url|max:20000',
     ];
     
     /**
@@ -218,7 +221,12 @@ class CharacterImage extends Model
      */
     public function getImageUrlAttribute()
     {
-        return asset($this->imageDirectory . '/' . $this->imageFileName);
+        if(!isset($this->ext_url)) { return asset($this->imageDirectory . '/' . $this->imageFileName); }
+        else
+        {
+            $embed = new EmbedService();
+            return $embed->getEmbed($this->ext_url)['url'];
+        }
     }
 
     /**
@@ -248,6 +256,41 @@ class CharacterImage extends Model
      */
     public function getThumbnailUrlAttribute()
     {
-        return asset($this->imageDirectory . '/' . $this->thumbnailFileName);
+        if($this->use_custom_thumb || !isset($this->ext_url)) { return asset($this->imageDirectory . '/' . $this->thumbnailFileName); }
+        else
+        {
+            $embed = new EmbedService();
+            return $embed->getEmbed($this->ext_url)['thumbnail_url'];
+        }
+    }
+
+    /**
+     * Gets the display string for designers.
+     *
+     * @return string
+     */
+    public function getDisplayDesignersAttribute()
+    {
+        $designers = [];
+        foreach($this->designers as $designer) {
+            $designers[] = $designer->displayLink();
+        }
+        if(!count($designers)) $designers[] = 'N/A';
+        return implode(', ', $designers);
+    }
+
+    /**
+     * Gets the display string for artists.
+     *
+     * @return string
+     */
+    public function getDisplayArtistsAttribute()
+    {
+        $artists = [];
+        foreach($this->artists as $artist) {
+            $artists[] = $artist->displayLink();
+        }
+        if(!count($artists)) $artists[] = 'N/A';
+        return implode(', ', $artists);
     }
 }

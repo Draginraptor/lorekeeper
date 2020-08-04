@@ -3,29 +3,59 @@ $( document ).ready(function() {
 
     // Cropper ////////////////////////////////////////////////////////////////////////////////////
 
-    var $useCropper = $('#useCropper');
+    var $useCustomThumbnail = $('#useCustomThumbnail');
+    var $thumbnailSelect = $('#thumbnailSelect');
     var $thumbnailCrop = $('#thumbnailCrop');
     var $thumbnailUpload = $('#thumbnailUpload');
+    var $thumbnailDaPreview = $('#thumbnailDaPreview');
 
-    var useCropper = $useCropper.is(':checked');
+    var useCustomThumbnail = $useCustomThumbnail.is(':checked');
+    var useUploaded = false;
 
-    updateCropper();
+    updatePreviewArea();
 
-    $useCropper.on('change', function(e) {
-        useCropper = $useCropper.is(':checked');
-
-        updateCropper();
+    $useCustomThumbnail.on('change', function(e) {
+        useCustomThumbnail = $useCustomThumbnail.is(':checked');
+        updatePreviewArea();
     });
 
-    function updateCropper() {
-        if(useCropper) {
-            $thumbnailUpload.addClass('hide');
-            $thumbnailCrop.removeClass('hide');
+    function updatePreviewArea() {
+        if(useCustomThumbnail) {
+            unhideUpload();
         }
         else {
-            $thumbnailCrop.addClass('hide');
-            $thumbnailUpload.removeClass('hide');
+            if(($('#mainImage')[0] && $('#mainImage')[0].value) || useUploaded) { unhideCrop(); }
+            else if($('#extMainImage')[0] && $('#extMainImage')[0].value) { unhideDaPreview(); }
+            else { unhideSelect(); }
         }
+    }
+    
+    function unhideSelect() {
+        $thumbnailUpload.addClass('hide');
+        $thumbnailSelect.removeClass('hide');
+        $thumbnailCrop.addClass('hide');
+        $thumbnailDaPreview.addClass('hide');
+    }
+
+    function unhideCrop() {
+        $thumbnailUpload.addClass('hide');
+        $thumbnailSelect.addClass('hide');
+        $thumbnailCrop.removeClass('hide');
+        $thumbnailDaPreview.addClass('hide');
+    }
+
+    function unhideDaPreview() {
+        $thumbnailUpload.addClass('hide');
+        $thumbnailSelect.addClass('hide');
+        $thumbnailCrop.addClass('hide');
+        $thumbnailDaPreview.removeClass('hide');
+    }
+
+    function unhideUpload() {
+        $thumbnailUpload.removeClass('hide');
+        $thumbnailSelect.addClass('hide');
+        $thumbnailCrop.addClass('hide');
+        $thumbnailDaPreview.addClass('hide');
     }
 
     // Designers and artists //////////////////////////////////////////////////////////////////////
@@ -64,6 +94,11 @@ $( document ).ready(function() {
 
     // Traits /////////////////////////////////////////////////////////////////////////////////////
     
+    $('.initial.feature-select').selectize({
+        render: {
+            item: featureSelectedRender
+        }
+    });
     $('#add-feature').on('click', function(e) {
         e.preventDefault();
         addFeatureRow();
@@ -81,10 +116,17 @@ $( document ).ready(function() {
             e.preventDefault();
             removeFeatureRow($(this));
         })
-        $clone.find('.feature-select').selectize();
+        $clone.find('.feature-select').selectize({
+            render: {
+                item: featureSelectedRender
+            }
+        });
     }
     function removeFeatureRow($trigger) {
         $trigger.parent().remove();
+    }
+    function featureSelectedRender(item, escape) {
+        return '<div><span>' + escape(item["text"].trim()) + ' (' + escape(item["optgroup"].trim()) + ')' + '</span></div>';
     }
 
     // Croppie ////////////////////////////////////////////////////////////////////////////////////
@@ -100,6 +142,8 @@ $( document ).ready(function() {
     var zoom = 0;
 
     @if(isset($useUploaded) && $useUploaded)
+        useUploaded = true; 
+        unhideCrop();
         // This is for modification of an existing image:
         c = new Croppie($cropper[0], {
             viewport: {
@@ -117,9 +161,17 @@ $( document ).ready(function() {
         }).then(function() {
             updateCropValues();
         });
-        console.log(($x1.val() - $x0.val()) / thumbnailWidth);
+        //console.log(($x1.val() - $x0.val()) / thumbnailWidth);
     @else
         function readURL(input) {
+            // First reset croppie
+            if(c) {
+                c.destroy();
+                c.element.outerHTML = c.element.innerHTML;
+            }
+            c = null;
+            $cropper = $('#cropper');
+            $cropper.attr('src', '#');
             if (input.files && input.files[0]) {
                 var reader = new FileReader();
                 reader.onload = function(e) {
@@ -134,17 +186,50 @@ $( document ).ready(function() {
                             updateCropValues();
                         }
                     });
-        console.log(c);
+                    //console.log(c);
                     updateCropValues();
-                    $('#cropSelect').addClass('hide');
-                    $cropper.removeClass('hide');
                 }
                 reader.readAsDataURL(input.files[0]);
             }
         }
 
         $("#mainImage").change(function() {
+            $('#extMainImage')[0].value = null;
+            $useCustomThumbnail.bootstrapToggle('off');
             readURL(this);
+        });
+
+        function fetchEmbeds(url) {
+            // Set current embed and error as loading
+            $('#previewMessage').html('Loading...');
+            $('#thumbnailDa').attr('src', '/images/loading.gif');
+            if(typeof url !== 'undefined') {
+                $.get("{{ url('embed') }}?url="+url, function(data, status) {
+                    if(typeof data['error'] !== 'undefined') {
+                        $('#previewMessage').html('Error: ' + data['error']);
+                        $('#thumbnailDa').attr('src', '#');
+                    }
+                    else
+                    {
+                        $('#previewMessage').html('Image found: <a href=' + url + '>' + url + '</a>');
+                        $('#thumbnailDa').attr('src', data['thumbnail_url']);
+                    }
+                    updatePreviewArea();
+                }).catch(function() {
+                    $('#previewMessage').html('Error: Server failed to process request');
+                    $('#thumbnailDa').attr('src', '#');
+                });
+            }
+            else {
+                $('#previewMessage').html('Error: URL is undefined');
+                $('#thumbnailDa').attr('src', '#');
+            }
+        }
+
+        $("#extMainImage").on('input', function() {
+            $("#mainImage")[0].value = null;
+            $useCustomThumbnail.bootstrapToggle('off');
+            fetchEmbeds(this.value);
         });
     @endif
 
