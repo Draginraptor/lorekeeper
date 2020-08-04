@@ -1856,6 +1856,7 @@ class CharacterManager extends Service
             $request->rawFeatures()->update(['character_image_id' => $image->id, 'character_type' => 'Character']);
 
             // Move the image file to the new image
+            if(!File::exists(dirname($image->imagePath))) File::makeDirectory(dirname($image->imagePath));
             if(!File::exists($image->imagePath)) File::makeDirectory($image->imagePath);
             if(!File::exists($image->thumbnailPath)) File::makeDirectory($image->thumbnailPath);
             if(!isset($request->ext_url)) File::move($request->imagePath . '/' . $request->imageFileName, $image->imagePath . '/' . $image->imageFileName);
