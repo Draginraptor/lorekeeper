@@ -12,5 +12,12 @@ return [
     //     'version' => '1.0.0',
     // ],
     
-
+    'character_lineages' => [
+        'key' => 'character_lineages',
+        'wiki_key' => 'Character_Lineages',
+        'creators' => json_encode([
+            'DeeP-ci' => 'https://github.com/DeeP-ci',
+        ]),
+        'version' => '1.0.0',
+    ],
 ];
